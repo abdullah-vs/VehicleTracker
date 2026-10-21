@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /vehicles/{vehicleId} {
+
+      // মালিক নিজের গাড়ি তৈরি করতে পারবে; শুরুতে কোনো ট্র্যাকার থাকবে না
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.trackerUid == null;
+
+      // শুধু মালিক পড়তে পারবে। অন্য কেউ কারও গাড়ির লোকেশন দেখতে পারবে না
+      allow read: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid;
+
+      // মালিক: আনপেয়ার বা নিজের গাড়ির সেটিং বদল
+      allow update: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      // জোড়া লাগানো ট্র্যাকার: শুধু নিজের লোকেশন লিখতে পারবে, সময় সার্ভার থেকে আসতে হবে
+      allow update: if request.auth != null
+        && resource.data.trackerUid == request.auth.uid
+        && request.resource.data.trackerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.lastUpdate == request.time;
+
+      // প্রথমবার পেয়ারিং: গাড়ির ট্র্যাকার খালি থাকতে হবে এবং কোডটি বৈধ, অব্যবহৃত ও মেয়াদের ভেতর হতে হবে
+      allow update: if request.auth != null
+        && resource.data.trackerUid == null
+        && request.resource.data.trackerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && get(/databases/$(database)/documents/pairingCodes/$(request.resource.data.claimCode)).data.vehicleId == vehicleId
+        && get(/databases/$(database)/documents/pairingCodes/$(request.resource.data.claimCode)).data.used == false
+        && get(/databases/$(database)/documents/pairingCodes/$(request.resource.data.claimCode)).data.expiresAt > request.time;
+
+      allow delete: if false;
+    }
+
+    match /pairingCodes/{code} {
+
+      // কোড যাচাই করতে সব লগইন করা ব্যবহারকারী পড়তে পারবে; তালিকা (list) দেওয়া হয়নি
+      allow read: if request.auth != null;
+
+      // মালিক শুধু নিজের গাড়ির জন্য কোড বানাতে পারবে
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.used == false
+        && get(/databases/$(database)/documents/vehicles/$(request.resource.data.vehicleId)).data.ownerUid == request.auth.uid;
+
+      // কোড শুধু একবার "used" করা যাবে এবং মেয়াদের মধ্যে হতে হবে
+      allow update: if request.auth != null
+        && resource.data.used == false
+        && resource.data.expiresAt > request.time
+        && request.resource.data.used == true
+        && request.resource.data.vehicleId == resource.data.vehicleId
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      allow delete: if false;
+    }
+  }
+}
